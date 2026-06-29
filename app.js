@@ -9,8 +9,10 @@
     let projects = [];
     
     // UI State
-    let currentFilter = "today"; // "today", "all", "important", "completed", or a project UUID
+    let currentFilter = "today"; // "today", "all", "important", "completed", or a project ID
     let hideCompleted = true;
+    let searchQuery = "";
+    let sortCriteria = "created_at"; // "created_at", "due_date", "priority"
 
     // DOM Elements Cache
     const currentViewTitle = document.getElementById("current-view-title");
@@ -25,6 +27,7 @@
     
     const sidebarProjectsList = document.getElementById("sidebar-projects-list");
     const selectTaskProject = document.getElementById("task-project");
+    const selectEditTaskProject = document.getElementById("edit-task-project");
     const tasksListItems = document.getElementById("tasks-list-items");
     const tasksListTitle = document.getElementById("tasks-list-title");
     
@@ -35,14 +38,23 @@
     const progressBarFill = document.getElementById("progress-bar-fill");
     const progressPercentLabel = document.getElementById("progress-percentage-label");
 
-    // Modal elements
+    // Modal elements (New Project)
     const projectModal = document.getElementById("project-modal");
     const btnOpenProjectModal = document.getElementById("btn-open-project-modal");
     const btnCloseProjectModal = document.getElementById("btn-close-project-modal");
     const addProjectForm = document.getElementById("add-project-form");
     const projectColorPicker = document.getElementById("project-color-picker");
 
-    // Forms
+    // Modal elements (Edit Task)
+    const editTaskModal = document.getElementById("edit-task-modal");
+    const btnCloseEditModal = document.getElementById("btn-close-edit-modal");
+    const editTaskForm = document.getElementById("edit-task-form");
+
+    // Search and Sort controls
+    const taskSearchInput = document.getElementById("task-search-input");
+    const taskSortSelect = document.getElementById("task-sort-select");
+
+    // Forms and filters
     const addTaskForm = document.getElementById("add-task-form");
     const btnHideCompleted = document.getElementById("btn-hide-completed");
 
@@ -192,12 +204,28 @@
             });
         }
 
+        // Search Input handler
+        if (taskSearchInput) {
+            taskSearchInput.addEventListener("input", function() {
+                searchQuery = this.value.toLowerCase().trim();
+                renderTasks();
+            });
+        }
+
+        // Sort Select dropdown handler
+        if (taskSortSelect) {
+            taskSortSelect.addEventListener("change", function() {
+                sortCriteria = this.value;
+                renderTasks();
+            });
+        }
+
         // Add task form submission
         if (addTaskForm) {
             addTaskForm.addEventListener("submit", handleAddTask);
         }
 
-        // Modal triggers
+        // Modal triggers (New Project)
         if (btnOpenProjectModal && projectModal) {
             btnOpenProjectModal.addEventListener("click", () => projectModal.classList.remove("hidden"));
         }
@@ -211,6 +239,19 @@
         }
         if (addProjectForm) {
             addProjectForm.addEventListener("submit", handleAddProject);
+        }
+
+        // Modal triggers (Edit Task)
+        if (btnCloseEditModal && editTaskModal) {
+            btnCloseEditModal.addEventListener("click", () => editTaskModal.classList.add("hidden"));
+        }
+        if (editTaskModal) {
+            editTaskModal.addEventListener("click", (e) => {
+                if (e.target === editTaskModal) editTaskModal.classList.add("hidden");
+            });
+        }
+        if (editTaskForm) {
+            editTaskForm.addEventListener("submit", handleEditTaskSubmit);
         }
     }
 
@@ -399,6 +440,79 @@
         }
     }
 
+    // --- TASK EDITING MODAL INITIATORS ---
+    function openEditModal(task) {
+        if (!editTaskModal) return;
+
+        document.getElementById("edit-task-id").value = task.id;
+        document.getElementById("edit-task-title").value = task.title;
+        document.getElementById("edit-task-desc").value = task.description || "";
+        document.getElementById("edit-task-due-date").value = task.due_date || "";
+        document.getElementById("edit-task-priority").value = task.priority || "medium";
+        
+        // Populate edit project select dropdown
+        if (selectEditTaskProject) {
+            selectEditTaskProject.innerHTML = "";
+            projects.forEach(p => {
+                const opt = document.createElement("option");
+                opt.value = p.id;
+                opt.textContent = p.name;
+                selectEditTaskProject.appendChild(opt);
+            });
+            selectEditTaskProject.value = task.project_id || "inbox";
+        }
+
+        editTaskModal.classList.remove("hidden");
+    }
+
+    async function handleEditTaskSubmit(e) {
+        e.preventDefault();
+
+        const id = document.getElementById("edit-task-id").value;
+        const title = document.getElementById("edit-task-title").value.trim();
+        const description = document.getElementById("edit-task-desc").value.trim();
+        const due_date = document.getElementById("edit-task-due-date").value;
+        const priority = document.getElementById("edit-task-priority").value;
+        const project_id = document.getElementById("edit-task-project").value;
+
+        if (!title) return;
+
+        // Find existing task in cache
+        const originalTask = tasks.find(t => t.id === id);
+        if (!originalTask) return;
+
+        const updatedTask = {
+            ...originalTask,
+            title: title,
+            description: description,
+            due_date: due_date,
+            priority: priority,
+            project_id: project_id
+        };
+
+        // Update in-memory
+        tasks = tasks.map(t => t.id === id ? updatedTask : t);
+        saveToLocalStorage();
+        renderUI();
+
+        // Close modal
+        editTaskModal.classList.add("hidden");
+
+        // Sync to D1
+        try {
+            const res = await fetch(`${BACKEND_URL}/api/tasks`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(updatedTask)
+            });
+            if (!res.ok) throw new Error("Failed to save edited task");
+            fetchData();
+        } catch (err) {
+            console.warn("Could not sync task modifications to Cloudflare D1", err);
+            updateStatusBadge("offline");
+        }
+    }
+
     // --- DOM RENDERING UTILS ---
     
     function getTaskFilterCallback() {
@@ -431,9 +545,11 @@
         sidebarProjectsList.innerHTML = "";
         
         projects.forEach(p => {
-            // Do not show delete button on the default Inbox
             const isInbox = p.id === "inbox";
             
+            // Calculate active (uncompleted) task count for this project
+            const activeCount = tasks.filter(t => t.project_id === p.id && !t.is_completed).length;
+
             const btn = document.createElement("button");
             btn.className = `project-item ${currentFilter === p.id ? 'active' : ''}`;
             btn.dataset.id = p.id;
@@ -442,6 +558,7 @@
                 <div class="project-item-left">
                     <span class="project-color-dot" style="background: ${p.color};"></span>
                     <span>${p.name}</span>
+                    <span class="project-count-badge">${activeCount}</span>
                 </div>
                 ${!isInbox ? `
                 <div class="project-item-actions">
@@ -453,14 +570,11 @@
 
             // Click listener for project switching
             btn.addEventListener("click", function(e) {
-                // Avoid project delete button click firing project switch
                 if (e.target.closest(".btn-project-delete")) return;
 
-                // Deactivate sidebar nav items
                 const navButtons = document.querySelectorAll(".sidebar-nav .nav-item");
                 navButtons.forEach(b => b.classList.remove("active"));
                 
-                // Highlight active project
                 const projectBtns = document.querySelectorAll(".project-item");
                 projectBtns.forEach(pBtn => pBtn.classList.remove("active"));
                 this.classList.add("active");
@@ -485,7 +599,6 @@
     function renderProjectOptions() {
         if (!selectTaskProject) return;
         
-        // Cache current selection
         const currentSel = selectTaskProject.value;
         selectTaskProject.innerHTML = "";
         
@@ -496,7 +609,6 @@
             selectTaskProject.appendChild(opt);
         });
         
-        // Restore selection
         if (projects.some(p => p.id === currentSel)) {
             selectTaskProject.value = currentSel;
         } else {
@@ -511,12 +623,11 @@
         const filterFn = getTaskFilterCallback();
         let filteredTasks = tasks.filter(filterFn);
 
-        // Calculate progress metrics on active list (before hiding completed tasks)
+        // Calculate progress metrics on active list (before hiding completed tasks or filtering by search)
         const totalCount = filteredTasks.length;
         const completedCount = filteredTasks.filter(t => t.is_completed).length;
         const pendingCount = totalCount - completedCount;
         
-        // Calculate Overdue tasks in this view
         const todayStr = new Date().toISOString().split('T')[0];
         const overdueCount = filteredTasks.filter(t => !t.is_completed && t.due_date && t.due_date < todayStr).length;
 
@@ -529,18 +640,40 @@
         progressBarFill.style.width = `${completionRate}%`;
         progressPercentLabel.textContent = `Đã hoàn thành ${completionRate}%`;
 
+        // Apply search query filter if typed
+        if (searchQuery) {
+            filteredTasks = filteredTasks.filter(t => 
+                t.title.toLowerCase().includes(searchQuery) || 
+                (t.description && t.description.toLowerCase().includes(searchQuery))
+            );
+        }
+
+        // Apply sorting criteria
+        if (sortCriteria === "due_date") {
+            filteredTasks.sort((a, b) => {
+                if (!a.due_date) return 1;
+                if (!b.due_date) return -1;
+                return a.due_date.localeCompare(b.due_date);
+            });
+        } else if (sortCriteria === "priority") {
+            const priorityWeight = { high: 3, medium: 2, low: 1 };
+            filteredTasks.sort((a, b) => (priorityWeight[b.priority] || 2) - (priorityWeight[a.priority] || 2));
+        } else {
+            // Default "created_at" descending (newest first)
+            filteredTasks.sort((a, b) => b.created_at.localeCompare(a.created_at));
+        }
+
         // Apply completed task hiding if toggled on
         if (hideCompleted) {
             filteredTasks = filteredTasks.filter(t => !t.is_completed);
         }
 
         if (filteredTasks.length === 0) {
-            tasksListItems.innerHTML = `<div class="no-tasks-message">Không có công việc nào. Bạn hãy thêm việc mới ở trên nhé!</div>`;
+            tasksListItems.innerHTML = `<div class="no-tasks-message">Không tìm thấy công việc nào phù hợp.</div>`;
             return;
         }
 
         filteredTasks.forEach(t => {
-            // Find project color & name
             const proj = projects.find(p => p.id === t.project_id) || projects.find(p => p.id === "inbox");
             
             const card = document.createElement("div");
@@ -593,14 +726,24 @@
 
             // Checkbox event
             const checkbox = card.querySelector("input[type='checkbox']");
-            checkbox.addEventListener("change", function() {
+            checkbox.addEventListener("change", function(e) {
+                e.stopPropagation(); // prevent opening edit modal when checking task
                 handleToggleTask(t.id, this.checked);
             });
 
             // Delete event
             const delBtn = card.querySelector(".btn-task-delete");
-            delBtn.addEventListener("click", function() {
+            delBtn.addEventListener("click", function(e) {
+                e.stopPropagation(); // prevent opening edit modal when deleting task
                 handleDeleteTask(this.dataset.id);
+            });
+
+            // Click event on the card itself to open Edit Modal
+            card.addEventListener("click", function(e) {
+                // Check that click didn't come from action buttons
+                if (!e.target.closest(".task-checkbox-container") && !e.target.closest(".task-actions")) {
+                    openEditModal(t);
+                }
             });
 
             tasksListItems.appendChild(card);
