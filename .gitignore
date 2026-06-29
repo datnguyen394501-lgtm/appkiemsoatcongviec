@@ -11,3 +11,9 @@ backend/live_worker_url.txt
 # Exclude OS generated files
 .DS_Store
 Thumbs.db
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
