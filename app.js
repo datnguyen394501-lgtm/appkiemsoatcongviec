@@ -9,7 +9,7 @@
     let projects = [];
     
     // UI State
-    let currentFilter = "today"; // "today", "all", "important", "completed", or a project ID
+    let currentFilter = "all"; // "today", "all", "important", "completed", or a project ID
     let hideCompleted = true;
     let searchQuery = "";
     let sortCriteria = "created_at"; // "created_at", "due_date", "priority"
@@ -283,7 +283,7 @@
             project_id: projectInput.value,
             title: titleInput.value.trim(),
             description: descInput.value.trim(),
-            due_date: dateInput.value,
+            due_date: dateInput.value || (currentFilter === "today" ? new Date().toISOString().split('T')[0] : ""),
             is_completed: false,
             priority: priorityInput.value,
             created_at: new Date().toISOString()
