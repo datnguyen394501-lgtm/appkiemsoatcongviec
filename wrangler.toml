@@ -1,0 +1,8 @@
+name = "appkiemsoatcongviec"
+main = "worker.js"
+compatibility_date = "2026-06-29"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "quanlycongviec"
+database_id = "e717fc2c-fd38-4e37-b7c9-f808408ac560"
