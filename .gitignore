@@ -1,0 +1,13 @@
+# Exclude python venv
+venv/
+__pycache__/
+*.pyc
+
+# Exclude local database and configurations
+backend/local_d1_mock.db
+.env
+backend/live_worker_url.txt
+
+# Exclude OS generated files
+.DS_Store
+Thumbs.db
